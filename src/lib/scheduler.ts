@@ -92,12 +92,14 @@ export function getSlots(date: string, duration: number, data: AppData): TimeSlo
   const periods = schedule.periods || [];
   const slots: TimeSlot[] = [];
 
-  periods.forEach(([start, end]: any) => {
-    // suporte tanto a array quanto a objeto {start, end}
-    const sStart = typeof start === 'object' && start !== null ? (start as any).start : start;
-    const sEnd = typeof start === 'object' && start !== null ? (start as any).end : end;
-    const periodStart = timeToMinutes(sStart);
-    const periodEnd = timeToMinutes(sEnd);
+  periods.forEach((period: any) => {
+    if (!period) return;
+    const start = Array.isArray(period) ? period[0] : period.start;
+    const end = Array.isArray(period) ? period[1] : period.end;
+    if (!start || !end) return;
+
+    const periodStart = timeToMinutes(start);
+    const periodEnd = timeToMinutes(end);
 
     for (let current = periodStart; current + slotDuration <= periodEnd; current += step) {
       const hh = String(Math.floor(current / 60)).padStart(2, '0');
