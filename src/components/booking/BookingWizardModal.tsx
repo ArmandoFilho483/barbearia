@@ -44,11 +44,13 @@ export default function BookingWizardModal({
     time: '',
     name: '',
     phone: '',
-    notes: ''
+    notes: '',
+    lgpdConsent: false
   });
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
   const [deliveryResult, setDeliveryResult] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showLgpdModal, setShowLgpdModal] = useState(false);
 
   // Slots disponíveis para a data e serviço selecionados
   const selectedService = data.services[draft.serviceId];
@@ -91,6 +93,10 @@ export default function BookingWizardModal({
         alert('Informe seu nome e um WhatsApp válido para confirmar.');
         return;
       }
+      if (!draft.lgpdConsent) {
+        alert('É necessário concordar com o termo de tratamento de dados (LGPD) para prosseguir.');
+        return;
+      }
       setStep(4);
     }
   };
@@ -121,18 +127,20 @@ export default function BookingWizardModal({
       price: Number(selectedService.price),
       status: 'confirmed',
       createdAt: now,
-      confirmedAt: now
+      confirmedAt: now,
+      lgpdConsent: draft.lgpdConsent
     };
 
-    const delivery = await deliverBookingMessages(newBooking, data.settings);
-    newBooking.notifiedClient = delivery.client;
-    newBooking.notifiedOwner = delivery.owner;
-
-    setConfirmedBooking(newBooking);
-    setDeliveryResult(delivery);
+    // Salva imediatamente para travar o horário e liberar o cliente
     onBookingConfirmed(newBooking);
-    setIsSubmitting(false);
+    setConfirmedBooking(newBooking);
     setStep(5);
+    setIsSubmitting(false);
+
+    // Dispara a entrega de mensagens em segundo plano
+    deliverBookingMessages(newBooking, data.settings).then(delivery => {
+      setDeliveryResult(delivery);
+    });
   };
 
   return (
@@ -292,6 +300,27 @@ export default function BookingWizardModal({
                   />
                 </div>
 
+                <div className="field full" style={{ marginTop: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '9px', cursor: 'pointer', fontSize: '.84rem' }}>
+                    <input
+                      type="checkbox"
+                      style={{ marginTop: '3px' }}
+                      checked={draft.lgpdConsent}
+                      onChange={e => setDraft(d => ({ ...d, lgpdConsent: e.target.checked }))}
+                    />
+                    <span>
+                      Concordo com o armazenamento do meu nome e telefone para fins exclusivos de confirmação e lembrete deste agendamento, conforme a{' '}
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); setShowLgpdModal(true); }}
+                        style={{ background: 'none', border: 'none', padding: 0, color: 'var(--sage)', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}
+                      >
+                        Lei Geral de Proteção de Dados (LGPD)
+                      </button>.
+                    </span>
+                  </label>
+                </div>
+
                 {returningClient && (
                   <div className="returning-client">
                     <div>
@@ -389,50 +418,34 @@ export default function BookingWizardModal({
                 <b>
                   {formatDate(confirmedBooking.date)}, às {confirmedBooking.time}
                 </b>{' '}
-                reservado. Sua confirmação está no padrão abaixo.
+                reservado com sucesso.
               </p>
 
-              <p id="deliveryStatus" style={{ maxWidth: '570px', margin: '8px auto 0', color: 'var(--muted)', fontSize: '.84rem' }}>
-                {deliveryResult?.automatic && deliveryResult.owner && deliveryResult.client ? (
-                  <span>
-                    ✅ <b>Confirmações enviadas automaticamente!</b> Tanto o barbeiro quanto você já receberam os detalhes no WhatsApp.
-                  </span>
-                ) : deliveryResult?.automatic && deliveryResult.owner ? (
-                  <span>
-                    ✅ Aviso enviado ao barbeiro automaticamente pelo WhatsApp. Você também pode salvar o lembrete abaixo.
-                  </span>
-                ) : deliveryResult?.error ? (
-                  <span style={{ color: 'var(--copper)' }}>
-                    ⚠️ O servidor de envio automático demorou ou está indisponível. Utilize os botões abaixo para enviar manualmente.
-                  </span>
-                ) : (
-                  <span>
-                    ✅ Aviso ao proprietário aberto no WhatsApp — toque em Enviar. Depois, salve o lembrete no seu WhatsApp.
-                  </span>
-                )}
-              </p>
+              <div
+                style={{
+                  maxWidth: '560px',
+                  margin: '18px auto',
+                  padding: '16px 20px',
+                  borderRadius: '16px',
+                  background: 'rgba(36, 88, 166, 0.09)',
+                  border: '1px solid rgba(36, 88, 166, 0.25)',
+                  textAlign: 'left',
+                  color: 'var(--ink)'
+                }}
+              >
+                <strong style={{ display: 'block', fontSize: '.95rem', color: 'var(--sage)', marginBottom: '5px' }}>
+                  📱 Envio do Comprovante no WhatsApp
+                </strong>
+                <p style={{ margin: 0, fontSize: '.86rem', lineHeight: '1.5' }}>
+                  Nosso sistema de envio é <b>100% automático</b>. Como nosso servidor processa com alta segurança, <b>sua mensagem de confirmação chegará no seu WhatsApp em até 2 minutos</b>. Fique atento às suas notificações!
+                </p>
+              </div>
 
               <div className="whatsapp-bubble">
                 {confirmationMessage(confirmedBooking, data.settings)}
               </div>
 
-              <p style={{ maxWidth: '570px', margin: '14px auto 0', color: 'var(--muted)', fontSize: '.84rem' }}>
-                Toque em <b>Salvar lembrete no meu WhatsApp</b>: seu WhatsApp abre no seu próprio número com o lembrete pronto — é só tocar em <b>Enviar</b> para confirmar.
-              </p>
-
               <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '24px' }}>
-                <button
-                  className="btn btn-copper"
-                  onClick={() => openWhatsapp(data.settings.whatsapp, confirmationMessage(confirmedBooking, data.settings))}
-                >
-                  Reabrir aviso ao proprietário
-                </button>
-                <button
-                  className="btn btn-dark"
-                  onClick={() => openWhatsapp(confirmedBooking.phone, reminderMessage(confirmedBooking, data.settings))}
-                >
-                  Salvar lembrete no meu WhatsApp
-                </button>
                 <button
                   className="btn btn-ghost"
                   onClick={() => {
@@ -440,22 +453,44 @@ export default function BookingWizardModal({
                     alert('Mensagem copiada para a área de transferência!');
                   }}
                 >
-                  Copiar mensagem
+                  Copiar detalhes
                 </button>
                 <button
-                  className="btn btn-ghost"
+                  className="btn btn-dark"
                   onClick={() => {
                     onClose();
                     onOpenClientView(confirmedBooking.phone);
                   }}
                 >
-                  Ver meu agendamento
+                  Ver meus agendamentos
                 </button>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {showLgpdModal && (
+        <div className="overlay open" style={{ zIndex: 1200 }}>
+          <div className="modal" style={{ maxWidth: '580px', padding: '24px' }}>
+            <div className="modal-head">
+              <h2>Privacidade e Proteção de Dados (LGPD)</h2>
+              <button className="icon-btn" onClick={() => setShowLgpdModal(false)}>×</button>
+            </div>
+            <div style={{ padding: '20px 0', fontSize: '.88rem', lineHeight: '1.6', color: 'var(--muted)' }}>
+              <p>Em conformidade com a Lei Federal nº 13.709/2018 (Lei Geral de Proteção de Dados Pessoais):</p>
+              <ul>
+                <li><b>Finalidade:</b> Seus dados (nome e WhatsApp) são coletados exclusivamente para a reserva de horário, identificação na barbearia e envio de lembretes.</li>
+                <li><b>Segurança:</b> Seus dados não são vendidos, compartilhados ou utilizados para envio de spams ou propagandas não solicitadas.</li>
+                <li><b>Direito ao Esquecimento:</b> Você pode solicitar a qualquer momento a exclusão definitiva do seu cadastro diretamente com a barbearia.</li>
+              </ul>
+            </div>
+            <button className="btn btn-dark" style={{ width: '100%' }} onClick={() => setShowLgpdModal(false)}>
+              Entendi e fechar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -47,7 +47,8 @@ export default function AdminModal({
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === ADMIN_PASSWORD) {
+    const validPassword = data.settings.adminPassword || ADMIN_PASSWORD;
+    if (password === validPassword) {
       setIsAuthenticated(true);
       setErrorMsg('');
     } else {
@@ -323,6 +324,62 @@ export default function AdminModal({
               </>
             )}
 
+            {view === 'clients' && (
+              <div className="panel">
+                <div className="panel-head">
+                  <h3>Base de Clientes Cadastrados</h3>
+                  <span className="status">Conformidade LGPD</span>
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Nome</th>
+                        <th>WhatsApp</th>
+                        <th>Atendimentos</th>
+                        <th>Última Visita</th>
+                        <th>Privacidade (LGPD)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.keys(clientsMap).length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="empty">Nenhum cliente registrado ainda.</td>
+                        </tr>
+                      ) : (
+                        Object.entries(clientsMap).map(([rawPhone, c]) => (
+                          <tr key={rawPhone}>
+                            <td><b>{c.name}</b></td>
+                            <td>{formatPhone(c.phone)}</td>
+                            <td>{c.count} visita(s)</td>
+                            <td>{formatDateNumeric(c.lastDate)}</td>
+                            <td>
+                              <button
+                                className="mini no"
+                                onClick={() => {
+                                  if (!confirm(`Excluir definitivamente todos os dados e histórico de ${c.name}? Essa ação atende ao Direito ao Esquecimento da LGPD.`)) return;
+                                  const updatedBookings = { ...data.bookings };
+                                  Object.keys(updatedBookings).forEach(id => {
+                                    if (cleanPhone(updatedBookings[id].phone) === rawPhone) {
+                                      delete updatedBookings[id];
+                                    }
+                                  });
+                                  onUpdateData({ ...data, bookings: updatedBookings });
+                                  alert('Dados do cliente excluídos permanentemente.');
+                                }}
+                              >
+                                Excluir dados (LGPD)
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {view === 'agenda' && (
               <>
                 <div className="panel">
@@ -487,6 +544,30 @@ export default function AdminModal({
             {view === 'config' && (
               <div className="panel">
                 <div className="panel-head">
+                  <h3>Segurança e Senha de Acesso</h3>
+                </div>
+                <div style={{ padding: '18px' }} className="form-grid">
+                  <div className="field full">
+                    <label>Senha do Painel Administrativo</label>
+                    <input
+                      className="input"
+                      type="password"
+                      value={data.settings.adminPassword || ADMIN_PASSWORD}
+                      onChange={e =>
+                        onUpdateData({
+                          ...data,
+                          settings: { ...data.settings, adminPassword: e.target.value.trim() }
+                        })
+                      }
+                      placeholder="Defina uma senha segura"
+                    />
+                    <small style={{ color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                      Essa é a senha que você usa para entrar neste painel de gestão.
+                    </small>
+                  </div>
+                </div>
+
+                <div className="panel-head" style={{ borderTop: '1px solid var(--line)' }}>
                   <h3>Automação de WhatsApp (Evolution API)</h3>
                   <span className="status">100% Automático</span>
                 </div>

@@ -36,6 +36,7 @@ export interface Booking {
   updatedAt?: string;
   notifiedClient?: boolean;
   notifiedOwner?: boolean;
+  lgpdConsent?: boolean;
 }
 
 export interface ScheduleBlock {
@@ -61,6 +62,7 @@ export interface AppSettings {
   afternoonClose: string;
   weeklyHours: Record<DayKey, DaySchedule>;
   interval: number;
+  adminPassword?: string;
   evolutionApiUrl: string;
   evolutionApiKey: string;
   evolutionInstance: string;

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { AppData, Booking } from '@/types';
 import { loadStoredData, saveStoredData } from '@/lib/storage';
+import { subscribeToAppData } from '@/lib/firebase';
 import { getSlots, todayISO } from '@/lib/scheduler';
 
 import SplashScreen from '@/components/layout/SplashScreen';
@@ -23,7 +24,15 @@ export default function HomePage() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
 
   useEffect(() => {
+    // 1. Carrega dados do cache local imediatamente
     setData(loadStoredData());
+
+    // 2. Conecta em tempo real ao Firebase para escutar novas reservas ou alterações
+    const unsubscribe = subscribeToAppData(remoteData => {
+      setData(remoteData);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const handleUpdateData = (newData: AppData) => {

@@ -39,7 +39,7 @@ export async function sendEvolutionWhatsApp(phone: string, messageText: string, 
   const url = `${settings.evolutionApiUrl}/message/sendText/${encodeURIComponent(settings.evolutionInstance)}`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s tolerando hibernação
+  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout para tolerar despertar completo de servidor gratuito
 
   try {
     const res = await fetch(url, {

@@ -41,6 +41,7 @@ export const defaultData: AppData = {
     afternoonClose: '19:00',
     weeklyHours: DEFAULT_WEEKLY_HOURS,
     interval: 30,
+    adminPassword: 'barbearia2026',
     evolutionApiUrl: '',
     evolutionApiKey: '',
     evolutionInstance: '',

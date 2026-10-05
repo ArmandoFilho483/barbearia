@@ -1,5 +1,6 @@
 import { AppData } from '@/types';
 import { defaultData, STORAGE_KEY } from './constants';
+import { saveRemoteAppData } from './firebase';
 
 export function loadStoredData(): AppData {
   if (typeof window === 'undefined') return defaultData;
@@ -20,5 +21,8 @@ export function loadStoredData(): AppData {
 
 export function saveStoredData(data: AppData) {
   if (typeof window === 'undefined') return;
+  // 1. Salva no cache local para resposta imediata
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  // 2. Sincroniza em nuvem no Firebase para todos os aparelhos
+  saveRemoteAppData(data);
 }
