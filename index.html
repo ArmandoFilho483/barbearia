@@ -97,7 +97,7 @@
     const WEEK_DAYS=[{key:"0",label:"Domingo"},{key:"1",label:"Segunda-feira"},{key:"2",label:"Terça-feira"},{key:"3",label:"Quarta-feira"},{key:"4",label:"Quinta-feira"},{key:"5",label:"Sexta-feira"},{key:"6",label:"Sábado"}];
     const DEFAULT_WEEKLY_HOURS=Object.fromEntries(WEEK_DAYS.map(day=>[day.key,{closed:day.key==="0"||day.key==="1",periods:[{start:"09:00",end:"12:00"},{start:"13:00",end:"19:00"}]}]));
     const defaultData = {
-      settings:{brand:"Barbearia Emanuel Sousa",professional:"Emanuel Pereira De Sousa",address:"Rua do Estilo, 126 — Centro",hours:"Ter–Sáb · 09h às 19h",whatsapp:"",instagram:"",confirmationObs:"chegar 10 min antes do horário se não pode perder o seu horário!",morningOpen:"09:00",morningClose:"12:00",afternoonOpen:"13:00",afternoonClose:"19:00",weeklyHours:structuredClone(DEFAULT_WEEKLY_HOURS),interval:30,apiProvider:"none",apiInstance:"",apiToken:"",apiClientToken:"",apiUrl:"",autoClient:true,autoOwner:true},
+      settings:{brand:"Barbearia Emanuel Sousa",professional:"Emanuel Pereira De Sousa",address:"Rua do Estilo, 126 — Centro",hours:"Ter–Sáb · 09h às 19h",whatsapp:"",instagram:"",confirmationObs:"chegar 10 min antes do horário se não pode perder o seu horário!",morningOpen:"09:00",morningClose:"12:00",afternoonOpen:"13:00",afternoonClose:"19:00",weeklyHours:structuredClone(DEFAULT_WEEKLY_HOURS),interval:30,evolutionApiUrl:"",evolutionApiKey:"",evolutionInstance:"",autoSendWhatsApp:false},
       services:{
         corte:{id:"corte",name:"Corte masculino",duration:40,price:40,description:"Tesoura, máquina e acabamento."},
         combo:{id:"combo",name:"Corte + barba",duration:60,price:60,description:"Experiência completa, do fio ao contorno."},
@@ -148,12 +148,79 @@
     function reminderMessage(booking){
       return `⏰ Lembrete do meu agendamento — ${data.settings.brand}\n\n📅 Data: ${formatDateNumeric(booking.date)}\n🕙 Hora: ${booking.time}\n✂️ Serviço: ${booking.serviceName}\n💈 Profissional: ${data.settings.professional}\n💰 Valor: ${money(booking.price)} Reais\n📍 Endereço: ${data.settings.address}\nObs: ${data.settings.confirmationObs}\n\n✅ Agendamento confirmado.`;
     }
-    /* Ao confirmar: abre automaticamente o WhatsApp do proprietário com o aviso. */
+    /* Envio automatizado via Evolution API */
+    async function sendEvolutionWhatsApp(phone, messageText){
+      const s = data.settings;
+      if (!s.evolutionApiUrl || !s.evolutionApiKey || !s.evolutionInstance) {
+        throw new Error("Evolution API não configurada");
+      }
+      const rawNum = cleanPhone(phone);
+      const number = rawNum.startsWith("55") ? rawNum : `55${rawNum}`;
+      const url = `${s.evolutionApiUrl}/message/sendText/${encodeURIComponent(s.evolutionInstance)}`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout para tolerar acordar de hibernação
+      
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": s.evolutionApiKey
+          },
+          body: JSON.stringify({
+            number: number,
+            text: messageText,
+            delay: 1200,
+            linkPreview: false
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          throw new Error(`Erro HTTP ${res.status}: ${errBody || res.statusText}`);
+        }
+        return true;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        console.warn("Falha no disparo da Evolution API:", err);
+        throw err;
+      }
+    }
+
+    /* Ao confirmar: dispara automaticamente via Evolution API ou abre WhatsApp como contingência */
     async function deliverBookingMessages(booking){
-      const result={client:false,owner:false};
-      const ownerPhone=cleanPhone(data.settings.whatsapp);
-      if(ownerPhone)result.owner=openWhatsapp(ownerPhone,ownerMessage(booking));
-      else toast("Cadastre o WhatsApp do proprietário no painel, em Configurações");
+      const result = { client: false, owner: false, automatic: false, error: null };
+      const ownerPhone = cleanPhone(data.settings.whatsapp);
+      const clientPhone = cleanPhone(booking.phone);
+      const s = data.settings;
+
+      // Se o modo automático estiver ativo e a API configurada
+      if (s.autoSendWhatsApp && s.evolutionApiUrl && s.evolutionApiKey && s.evolutionInstance) {
+        try {
+          const promises = [];
+          if (ownerPhone) {
+            promises.push(sendEvolutionWhatsApp(ownerPhone, ownerMessage(booking)).then(() => { result.owner = true; }));
+          }
+          if (clientPhone) {
+            promises.push(sendEvolutionWhatsApp(clientPhone, confirmationMessage(booking)).then(() => { result.client = true; }));
+          }
+          await Promise.all(promises);
+          result.automatic = true;
+          return result;
+        } catch (err) {
+          result.error = err.message || "Servidor demorou a responder ou está indisponível";
+          console.warn("Falha no envio automático, preparando contingência manual.", err);
+        }
+      }
+
+      // Contingência ou Modo Manual Padrão
+      if (ownerPhone) {
+        result.owner = openWhatsapp(ownerPhone, ownerMessage(booking));
+      } else {
+        toast("Cadastre o WhatsApp do proprietário no painel, em Configurações");
+      }
       return result;
     }
 
@@ -265,7 +332,15 @@
 
     function updateDeliveryStatus(delivery){
       const el=$("#deliveryStatus");if(!el)return;
-      el.textContent=delivery.owner?"✅ Aviso ao proprietário aberto no WhatsApp — toque em Enviar. Depois, salve o lembrete no seu WhatsApp.":"Não foi possível abrir o aviso ao proprietário. Use o botão abaixo.";
+      if (delivery.automatic && delivery.owner && delivery.client) {
+        el.innerHTML = "✅ <b>Confirmações enviadas automaticamente!</b> Tanto o barbeiro quanto você já receberam os detalhes no WhatsApp.";
+      } else if (delivery.automatic && delivery.owner) {
+        el.innerHTML = "✅ Aviso enviado ao barbeiro automaticamente pelo WhatsApp. Você também pode salvar o lembrete abaixo.";
+      } else if (delivery.error) {
+        el.innerHTML = "<span style='color:var(--copper)'>⚠️ O servidor de envio automático demorou ou está indisponível.</span> Utilize os botões abaixo para enviar manualmente.";
+      } else {
+        el.textContent = delivery.owner ? "✅ Aviso ao proprietário aberto no WhatsApp — toque em Enviar. Depois, salve o lembrete no seu WhatsApp." : "Não foi possível abrir o aviso ao proprietário. Use o botão abaixo.";
+      }
     }
     $("#searchClient").onclick=renderClientResults;$("#clientPhone").addEventListener("keydown",e=>{if(e.key==="Enter")renderClientResults()});$("#clientPhone").addEventListener("input",e=>{e.target.value=maskPhone(e.target.value);clearTimeout(renderClientResults.t);if(phoneKey(e.target.value).length>=10)renderClientResults.t=setTimeout(renderClientResults,350)});
     function renderClientResults(){
@@ -323,7 +398,7 @@
     }
     function downloadFinancialPdf(start,end){const items=financialBookings(start,end),blob=makeFinancialPdf(items,start,end),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`relatorio-financeiro-${start}-a-${end}.pdf`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast("Relatório financeiro baixado")}
     function weeklyScheduleFields(){return WEEK_DAYS.map(dayInfo=>{const day=data.settings.weeklyHours[dayInfo.key],periods=day.periods||[],first=periods[0]||{start:"",end:""},second=periods[1]||{start:"",end:""},disabled=day.closed?"disabled":"";return `<div class="weekly-day ${day.closed?"is-closed":""}" data-weekday="${dayInfo.key}"><div class="weekly-day-head"><strong>${dayInfo.label}</strong><label class="closed-toggle"><input type="checkbox" data-day-closed="${dayInfo.key}" ${day.closed?"checked":""}> Fechado</label></div><div class="weekly-times"><div class="field"><label>1º turno — abre</label><input class="input" type="time" data-day-start="${dayInfo.key}-0" value="${first.start}" ${disabled}></div><div class="field"><label>1º turno — fecha</label><input class="input" type="time" data-day-end="${dayInfo.key}-0" value="${first.end}" ${disabled}></div><div class="field"><label>2º turno — abre</label><input class="input" type="time" data-day-start="${dayInfo.key}-1" value="${second.start}" ${disabled}></div><div class="field"><label>2º turno — fecha</label><input class="input" type="time" data-day-end="${dayInfo.key}-1" value="${second.end}" ${disabled}></div></div></div>`}).join("")}
-    function configView(){const s=data.settings;return `<div class="panel"><div class="panel-head"><h3>Dados da barbearia</h3></div><div style="padding:18px" class="form-grid"><div class="field"><label>Nome</label><input class="input" id="cfgBrand" value="${esc(s.brand)}"></div><div class="field"><label>Profissional</label><input class="input" id="cfgProfessional" value="${esc(s.professional||"")}" placeholder="Nome exibido na confirmação"></div><div class="field"><label>WhatsApp com DDI</label><input class="input" id="cfgWhats" value="${esc(s.whatsapp)}" placeholder="5511999999999"></div><div class="field"><label>Instagram da empresa</label><input class="input" id="cfgInstagram" value="${esc(s.instagram||"")}" placeholder="@barbeariaemanuelsousa"></div><div class="field full"><label>Observação da confirmação</label><input class="input" id="cfgObs" value="${esc(s.confirmationObs||"")}" placeholder="Ex.: chegar 10 min antes do horário"></div><div class="field full"><label>Endereço</label><input class="input" id="cfgAddress" value="${esc(s.address)}"></div><div class="field full"><label>Texto do horário exibido no site</label><input class="input" id="cfgHours" value="${esc(s.hours)}"></div><div class="field"><label>Intervalos da agenda em minutos</label><input class="input" id="cfgInterval" type="number" min="10" step="5" value="${s.interval}"></div></div></div><div class="panel"><div class="panel-head"><h3>Funcionamento por dia da semana</h3><span class="status">Até 2 turnos por dia</span></div><div class="weekly-schedule">${weeklyScheduleFields()}<button class="btn btn-dark" id="saveConfig">Salvar configurações</button></div></div><div class="panel"><div class="panel-head"><h3>Conexão de dados</h3></div><div style="padding:18px;color:var(--muted)">${dbApi?"✓ Firebase Realtime Database conectado.":"Modo demonstração local. Preencha o objeto firebaseConfig no início do script para conectar ao Realtime Database."}</div></div>`}
+    function configView(){const s=data.settings;return `<div class="panel"><div class="panel-head"><h3>Dados da barbearia</h3></div><div style="padding:18px" class="form-grid"><div class="field"><label>Nome</label><input class="input" id="cfgBrand" value="${esc(s.brand)}"></div><div class="field"><label>Profissional</label><input class="input" id="cfgProfessional" value="${esc(s.professional||"")}" placeholder="Nome exibido na confirmação"></div><div class="field"><label>WhatsApp com DDI</label><input class="input" id="cfgWhats" value="${esc(s.whatsapp)}" placeholder="5511999999999"></div><div class="field"><label>Instagram da empresa</label><input class="input" id="cfgInstagram" value="${esc(s.instagram||"")}" placeholder="@barbeariaemanuelsousa"></div><div class="field full"><label>Observação da confirmação</label><input class="input" id="cfgObs" value="${esc(s.confirmationObs||"")}" placeholder="Ex.: chegar 10 min antes do horário"></div><div class="field full"><label>Endereço</label><input class="input" id="cfgAddress" value="${esc(s.address)}"></div><div class="field full"><label>Texto do horário exibido no site</label><input class="input" id="cfgHours" value="${esc(s.hours)}"></div><div class="field"><label>Intervalos da agenda em minutos</label><input class="input" id="cfgInterval" type="number" min="10" step="5" value="${s.interval}"></div></div></div><div class="panel"><div class="panel-head"><h3>Funcionamento por dia da semana</h3><span class="status">Até 2 turnos por dia</span></div><div class="weekly-schedule">${weeklyScheduleFields()}<button class="btn btn-dark" id="saveConfig">Salvar configurações</button></div></div><div class="panel"><div class="panel-head"><h3>Automação de WhatsApp (Evolution API)</h3><span class="status">100% Automático</span></div><div style="padding:18px" class="form-grid"><div class="field full"><label>URL da Evolution API</label><input class="input" id="cfgEvoUrl" value="${esc(s.evolutionApiUrl||'')}" placeholder="https://sua-evolution-api.onrender.com"></div><div class="field"><label>Nome da Instância</label><input class="input" id="cfgEvoInstance" value="${esc(s.evolutionInstance||'')}" placeholder="ex.: Barbearia"></div><div class="field"><label>Chave de API (apikey)</label><input class="input" id="cfgEvoKey" type="password" value="${esc(s.evolutionApiKey||'')}" placeholder="Sua Chave API"></div><div class="field full"><label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer"><input type="checkbox" id="cfgEvoAuto" ${s.autoSendWhatsApp?'checked':''}> Ativar envio 100% automático (sem precisar abrir o app do WhatsApp)</label><small style="color:var(--muted);display:block;margin-top:4px">Quando ativado, o sistema envia sozinho tanto para o barbeiro quanto para o cliente. Se a API falhar ou estiver hibernando, o site disponibiliza os botões manuais como segurança.</small></div></div></div><div class="panel"><div class="panel-head"><h3>Conexão de dados</h3></div><div style="padding:18px;color:var(--muted)">${dbApi?"✓ Firebase Realtime Database conectado.":"Modo demonstração local. Preencha o objeto firebaseConfig no início do script para conectar ao Realtime Database."}</div></div>`}
     function captureServicesForm(){$$('[data-s-name]').forEach(el=>{const s=data.services[el.dataset.sName];if(!s)return;s.name=el.value.trim()||s.name;s.price=Math.max(0,Number($(`[data-s-price="${s.id}"]`).value)||0);s.duration=Math.max(5,Number($(`[data-s-duration="${s.id}"]`).value)||30);s.description=$(`[data-s-description="${s.id}"]`).value.trim()})}
     function resizeServicePhoto(file){
       return new Promise((resolve,reject)=>{if(!file.type.startsWith("image/"))return reject(new Error("Escolha um arquivo de imagem"));if(file.size>10*1024*1024)return reject(new Error("A foto deve ter no máximo 10 MB"));const reader=new FileReader();reader.onerror=()=>reject(new Error("Não foi possível ler a foto"));reader.onload=()=>{const image=new Image();image.onerror=()=>reject(new Error("Arquivo de imagem inválido"));image.onload=()=>{const max=1200,scale=Math.min(1,max/Math.max(image.width,image.height)),canvas=document.createElement("canvas");canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL("image/jpeg",.82))};image.src=reader.result};reader.readAsDataURL(file)})
@@ -353,7 +428,7 @@
       const addService=$("#addService");if(addService)addService.onclick=async()=>{captureServicesForm();const id=`service_${uid()}`;data.services[id]={id,name:"Novo serviço",duration:30,price:0,description:""};await persist();toast("Novo serviço acrescentado")};
       $$('[data-delete-service]').forEach(button=>button.onclick=async()=>{if(Object.keys(data.services).length<=1)return toast("Mantenha pelo menos um serviço disponível");const service=data.services[button.dataset.deleteService];if(!service||!confirm(`Excluir o serviço ${service.name}? O histórico financeiro será preservado.`))return;captureServicesForm();delete data.services[service.id];await persist();toast("Serviço excluído")});
       $$('[data-day-closed]').forEach(checkbox=>checkbox.onchange=()=>{const card=checkbox.closest('[data-weekday]'),closed=checkbox.checked;card.classList.toggle("is-closed",closed);card.querySelectorAll('input[type="time"]').forEach(input=>input.disabled=closed)});
-      const sc=$("#saveConfig");if(sc)sc.onclick=async()=>{const weeklyHours={};for(const dayInfo of WEEK_DAYS){const closed=$(`[data-day-closed="${dayInfo.key}"]`).checked,periods=[];for(let index=0;index<2;index++){const start=$(`[data-day-start="${dayInfo.key}-${index}"]`).value,end=$(`[data-day-end="${dayInfo.key}-${index}"]`).value;if(Boolean(start)!==Boolean(end))return toast(`Complete o início e o fim de ${dayInfo.label}`);if(start&&end){if(start>=end)return toast(`Revise os horários de ${dayInfo.label}`);periods.push({start,end})}}periods.sort((a,b)=>a.start.localeCompare(b.start));if(periods.length>1&&periods[0].end>periods[1].start)return toast(`Os turnos de ${dayInfo.label} não podem se sobrepor`);if(!closed&&!periods.length)return toast(`Informe um horário ou marque ${dayInfo.label} como fechado`);weeklyHours[dayInfo.key]={closed,periods}}data.settings={...data.settings,brand:$("#cfgBrand").value.trim(),professional:$("#cfgProfessional").value.trim()||defaultData.settings.professional,whatsapp:cleanPhone($("#cfgWhats").value),instagram:$("#cfgInstagram").value.trim(),confirmationObs:$("#cfgObs").value.trim()||defaultData.settings.confirmationObs,address:$("#cfgAddress").value.trim(),hours:$("#cfgHours").value.trim(),weeklyHours,interval:Number($("#cfgInterval").value)||30};delete data.settings.open;delete data.settings.close;await persist();toast("Configurações salvas")};
+      const sc=$("#saveConfig");if(sc)sc.onclick=async()=>{const weeklyHours={};for(const dayInfo of WEEK_DAYS){const closed=$(`[data-day-closed="${dayInfo.key}"]`).checked,periods=[];for(let index=0;index<2;index++){const start=$(`[data-day-start="${dayInfo.key}-${index}"]`).value,end=$(`[data-day-end="${dayInfo.key}-${index}"]`).value;if(Boolean(start)!==Boolean(end))return toast(`Complete o início e o fim de ${dayInfo.label}`);if(start&&end){if(start>=end)return toast(`Revise os horários de ${dayInfo.label}`);periods.push({start,end})}}periods.sort((a,b)=>a.start.localeCompare(b.start));if(periods.length>1&&periods[0].end>periods[1].start)return toast(`Os turnos de ${dayInfo.label} não podem se sobrepor`);if(!closed&&!periods.length)return toast(`Informe um horário ou marque ${dayInfo.label} como fechado`);weeklyHours[dayInfo.key]={closed,periods}}data.settings={...data.settings,brand:$("#cfgBrand").value.trim(),professional:$("#cfgProfessional").value.trim()||defaultData.settings.professional,whatsapp:cleanPhone($("#cfgWhats").value),instagram:$("#cfgInstagram").value.trim(),confirmationObs:$("#cfgObs").value.trim()||defaultData.settings.confirmationObs,address:$("#cfgAddress").value.trim(),hours:$("#cfgHours").value.trim(),evolutionApiUrl:$("#cfgEvoUrl")?$("#cfgEvoUrl").value.trim().replace(/\/+$/,""):"",evolutionApiKey:$("#cfgEvoKey")?$("#cfgEvoKey").value.trim():"",evolutionInstance:$("#cfgEvoInstance")?$("#cfgEvoInstance").value.trim():"",autoSendWhatsApp:$("#cfgEvoAuto")?$("#cfgEvoAuto").checked:false,weeklyHours,interval:Number($("#cfgInterval").value)||30};delete data.settings.open;delete data.settings.close;await persist();toast("Configurações salvas")};
     }
 
     $$('[data-whatsapp]').forEach(b=>b.onclick=()=>{const n=cleanPhone(data.settings.whatsapp);if(!n)return toast("WhatsApp ainda não configurado no painel");window.open(`https://wa.me/${n}`,"_blank","noopener")});
