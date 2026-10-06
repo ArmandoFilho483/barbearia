@@ -51,6 +51,9 @@ export async function sendEvolutionWhatsApp(phone: string, messageText: string, 
       body: JSON.stringify({
         number: number,
         text: messageText,
+        textMessage: {
+          text: messageText
+        },
         delay: 1200,
         linkPreview: false
       }),
