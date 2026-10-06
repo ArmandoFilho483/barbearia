@@ -32,7 +32,7 @@ export const defaultData: AppData = {
     professional: 'Emanuel Pereira De Sousa',
     address: 'Rua do Estilo, 126 — Centro',
     hours: 'Ter–Sáb · 09h às 19h',
-    whatsapp: '',
+    whatsapp: '558591839556',
     instagram: '',
     confirmationObs: 'chegar 10 min antes do horário se não pode perder o seu horário!',
     morningOpen: '09:00',
@@ -42,10 +42,10 @@ export const defaultData: AppData = {
     weeklyHours: DEFAULT_WEEKLY_HOURS,
     interval: 30,
     adminPassword: 'barbearia2026',
-    evolutionApiUrl: '',
-    evolutionApiKey: '',
-    evolutionInstance: '',
-    autoSendWhatsApp: false
+    evolutionApiUrl: 'https://evolution-api-latest-delk.onrender.com',
+    evolutionApiKey: 'Barbearia2026Api',
+    evolutionInstance: 'Barbearia',
+    autoSendWhatsApp: true
   },
   services: {
     corte: { id: 'corte', name: 'Corte masculino', duration: 40, price: 40, description: 'Tesoura, máquina e acabamento.' },
